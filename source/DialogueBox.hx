@@ -182,7 +182,7 @@ class DialogueBox extends FlxSpriteGroup
 			dialogueStarted = true;
 		}
 
-		if(PlayerSettings.player1.controls.ACCEPT)
+		if(PlayerSettings.player1.controls.ACCEPT || TouchFunctions.touchJustPressed)
 		{
 			if (dialogueEnded)
 			{

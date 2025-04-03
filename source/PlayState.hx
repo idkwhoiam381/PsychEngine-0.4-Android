@@ -49,6 +49,10 @@ import StageData;
 import FunkinLua;
 import DialogueBoxPsych;
 
+#if VIDEOS_ALLOWED
+import vlc.MP4Handler;
+#end
+
 #if sys
 import sys.FileSystem;
 #end
@@ -57,6 +61,11 @@ using StringTools;
 
 class PlayState extends MusicBeatState
 {
+	#if LUA_VIRTUALPAD
+ 	public var luaVirtualPad:FlxVirtualPad;
+ 	#end
+ 	public static var instance:PlayState;
+
 	public static var STRUM_X = 42;
 	public static var STRUM_X_MIDDLESCROLL = -278;
 
@@ -169,6 +178,9 @@ class PlayState extends MusicBeatState
 	public var camHUD:FlxCamera;
 	public var camGame:FlxCamera;
 	public var camOther:FlxCamera;
+	#if LUA_VIRTUALPAD
+ 	public var luaVpadCam:FlxCamera;
+ 	#end
 
 	var dialogue:Array<String> = ['blah blah blah', 'coolswag'];
 	var dialogueJson:DialogueFile = null;
@@ -249,17 +261,23 @@ class PlayState extends MusicBeatState
 		if (FlxG.sound.music != null)
 			FlxG.sound.music.stop();
 
+		// for lua
+  		instance = this;
+
 		practiceMode = false;
 		// var gameCam:FlxCamera = FlxG.camera;
 		camGame = new FlxCamera();
 		camHUD = new FlxCamera();
 		camOther = new FlxCamera();
+		#if LUA_VIRTUALPAD luaVpadCam = new FlxCamera(); #end
 		camHUD.bgColor.alpha = 0;
 		camOther.bgColor.alpha = 0;
+		#if LUA_VIRTUALPAD luaVpadCam.bgColor.alpha = 0; #end
 
 		FlxG.cameras.reset(camGame);
 		FlxG.cameras.add(camHUD);
 		FlxG.cameras.add(camOther);
+		#if LUA_VIRTUALPAD FlxG.cameras.add(luaVpadCam, false); #end
 		grpNoteSplashes = new FlxTypedGroup<NoteSplash>();
 
 		FlxCamera.defaultCameras = [camGame];
@@ -898,6 +916,10 @@ class PlayState extends MusicBeatState
 		timeTxt.cameras = [camHUD];
 		doof.cameras = [camHUD];
 
+		addMobileControls();
+ 		MusicBeatState.mobilec.visible = false;
+ 		MusicBeatState.mobilec.alpha = 0.000001;
+
 		// if (SONG.song == 'South')
 		// FlxG.camera.alpha = 0.7;
 		// UI_camera.zoom = 1;
@@ -1059,43 +1081,44 @@ class PlayState extends MusicBeatState
 		char.y += char.positionArray[1];
 	}
 
-	public function videoIntro(name:String):Void {
+	public function videoIntro(name:String)
+	{
 		#if VIDEOS_ALLOWED
-		var foundFile:Bool = false;
-		var fileName:String = #if MODS_ALLOWED Paths.mods('videos/' + name + '.' + Paths.VIDEO_EXT); #else ''; #end
+		inCutscene = true;
+
+		var filepath:String = Paths.video(name);
 		#if sys
-		if(FileSystem.exists(fileName)) {
-			foundFile = true;
-		}
+		if(!FileSystem.exists(filepath))
+		#else
+		if(!OpenFlAssets.exists(filepath))
 		#end
-
-		if(!foundFile) {
-			fileName = Paths.video(name);
-			#if sys
-			if(FileSystem.exists(fileName)) {
-			#else
-			if(OpenFlAssets.exists(fileName)) {
-			#end
-				foundFile = true;
-			}
-		}
-
-		if(foundFile) {
-			inCutscene = true;
-			var bg = new FlxSprite(-FlxG.width, -FlxG.height).makeGraphic(FlxG.width * 3, FlxG.height * 3, FlxColor.BLACK);
-			bg.scrollFactor.set();
-			add(bg);
-
-			(new FlxVideo(fileName)).finishCallback = function() {
-				remove(bg);
-				startCountdown();
-			}
+		{
+			FlxG.log.warn('Couldnt find video file: ' + name);
+			startCountdown();
 			return;
-		} else {
-			FlxG.log.warn('Couldnt find video file: ' + fileName);
 		}
+
+		var video:MP4Handler = new MP4Handler();
+		#if (hxCodec < "3.0.0" && !ios)
+		video.playVideo(filepath);
+		video.finishCallback = function()
+		{
+			startCountdown();
+			return;
+		}
+		#else
+		video.play(filepath);
+		video.onEndReached.add(function(){
+			video.dispose();
+			startAndEnd();
+			return;
+		});
 		#end
+		#else
+		FlxG.log.warn('Platform not supported!');
 		startCountdown();
+		return;
+		#end
 	}
 
 	var dialogueCount:Int = 0;
@@ -1220,6 +1243,8 @@ class PlayState extends MusicBeatState
 		inCutscene = false;
 		var ret:Dynamic = callOnLuas('onStartCountdown', []);
 		if(ret != FunkinLua.Function_Stop) {
+			MusicBeatState.mobilec.visible = true;
+ 			if (MusicBeatState.checkHitbox != true) MusicBeatState.mobilec.alpha = ClientPrefs.VirtualPadAlpha;
 			generateStaticArrows(0);
 			generateStaticArrows(1);
 			for (i in 0...playerStrums.length) {
@@ -1986,7 +2011,7 @@ class PlayState extends MusicBeatState
 		}
 		botplayTxt.visible = cpuControlled;
 
-		if (FlxG.keys.justPressed.ENTER && startedCountdown && canPause)
+		if (#if android FlxG.android.justReleased.BACK || #end FlxG.keys.justPressed.ENTER && startedCountdown && canPause)
 		{
 			var ret:Dynamic = callOnLuas('onPause', []);
 			if(ret != FunkinLua.Function_Stop) {
@@ -2837,6 +2862,7 @@ class PlayState extends MusicBeatState
 			}
 		}
 		
+		MusicBeatState.mobilec.visible = false;
 		timeBarBG.visible = false;
 		timeBar.visible = false;
 		timeTxt.visible = false;
@@ -3653,6 +3679,12 @@ class PlayState extends MusicBeatState
 		}
 		luaArray = [];
 		super.destroy();
+
+		#if LUA_VIRTUALPAD
+ 		if (luaVirtualPad != null)
+  			luaVirtualPad = FlxDestroyUtil.destroy(luaVirtualPad);
+  		#end
+  		instance = null;
 	}
 
 	public function cancelFadeTween() {
@@ -3943,4 +3975,44 @@ class PlayState extends MusicBeatState
 
 	var curLight:Int = 0;
 	var curLightEvent:Int = 0;
+
+	#if LUA_VIRTUALPAD
+ 	public function makeLuaVirtualPad(DPad:String, Action:String)
+  	{
+  	    if(members.contains(luaVirtualPad)) return;
+  
+  		luaVirtualPad = new FlxVirtualPad(DPad, Action);
+  		luaVirtualPad.alpha = ClientPrefs.VirtualPadAlpha;
+  	}
+  	
+  	public function addLuaVirtualPad() {
+  		if(luaVirtualPad == null || members.contains(luaVirtualPad)) return;
+  
+  		var target:Dynamic = PlayState.instance;
+  		target.insert(target.members.length + 1, luaVirtualPad);
+  	}
+  	
+  	public function addLuaVirtualPadCamera()
+  	{
+  		if(luaVirtualPad != null)
+  		    luaVirtualPad.cameras = [luaVpadCam];
+  	}
+  	
+  	public function removeLuaVirtualPad()
+  	{			
+  		if (luaVirtualPad != null) {
+  			luaVirtualPad.kill();
+  			luaVirtualPad.destroy();
+  			remove(luaVirtualPad);
+  			luaVirtualPad = null;
+  		}
+  	}
+  	
+  	public static function checkVPadPress(buttonPostfix:String, type = 'justPressed') {
+  		var buttonName = "button" + buttonPostfix;
+  		var button = Reflect.getProperty(PlayState.instance.luaVirtualPad, buttonName); //Access Spesific LuaVirtualPad Button
+  		return Reflect.getProperty(button, type);
+  		return false;
+  	}
+  	#end
 }
