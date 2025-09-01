@@ -35,7 +35,7 @@ class MainMenuState extends MusicBeatState
 
 	var magenta:FlxSprite;
 	var camFollow:FlxObject;
-	var camFollowPos:FlxObject
+	var camFollowPos:FlxObject;
 	var customMouse:FlxSprite;
 
 	public static var firstStart:Bool = true;
